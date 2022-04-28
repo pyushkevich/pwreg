@@ -126,27 +126,31 @@ class ChunkNCC(nn.Module):
     def __init__(self, k, radius=2):
         super(ChunkNCC, self).__init__()
         self.k = k
+        self.radius = radius
         self.nccsize = 2 * radius + 1
-        self.wmean = torch.ones((6,1,self.nccsize,self.nccsize)) / self.nccsize**2
+        self.wmean = torch.ones((5,1,self.nccsize,self.nccsize))
         self.eps = 0.01
 
     def ncc_maps(self, I, J, M):
 
         # Stack M, I, J, I^2, IJ, J^2 into channels
         MI, MJ = M * I, M * J
-        Z = torch.cat((M, MI, MJ, MI * I, MI * J, MJ * J), axis=1)
+        Z = torch.cat((I, J, I * I, I * J, J * J), axis=1)
 
         # Perform convolution
-        Zw = F.conv2d(Z, self.wmean, groups=6)
+        Zw = F.conv2d(Z, self.wmean, groups=5, padding=self.radius)
 
         # Compute signed NCC metric
         n = self.nccsize**2
         eps = 0.01
-        var_f = n * Zw[:, 3, :, :] - Zw[:, 1, :, :] ** 2 + eps
-        var_m = n * Zw[:, 5, :, :] - Zw[:, 2, :, :] ** 2 + eps
-        cov_fm = n * Zw[:, 4, :, :] - Zw[:, 1, :, :] * Zw[:, 2, :, :]
+        Iw, Jw, IIw, IJw, JJw = Zw[:,0,:,:], Zw[:,1,:,:], Zw[:,2,:,:], Zw[:,3,:,:], Zw[:,4,:,:]
+        var_f = n * IIw - Iw ** 2 + eps
+        var_m = n * JJw - Jw ** 2 + eps
+        cov_fm = n * IJw - Iw * Jw
 
-        return cov_fm * torch.abs(cov_fm) / (var_f * var_m)
+        ncc = cov_fm * torch.abs(cov_fm) / (var_f * var_m)
+        ncc = ncc.view(M.shape)
+        return M * ncc
 
     def forward(self, I, J, M):
         ncc = self.ncc_maps(I, J, M)
